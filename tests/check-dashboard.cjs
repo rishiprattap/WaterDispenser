@@ -1,0 +1,53 @@
+const fs = require('node:fs');
+const vm = require('node:vm');
+const assert = require('node:assert/strict');
+const html = fs.readFileSync('WaterDispenser/dashboard.h', 'utf8');
+const code = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+const elements = new Map();
+const element = id => {
+  if (!elements.has(id)) elements.set(id, {value:'',disabled:false,textContent:'',style:{setProperty(){}},classList:{add(){},remove(){}},setAttribute(){},addEventListener(event,fn){this[event]=fn;},reportValidity(){return true;}});
+  return elements.get(id);
+};
+const state = {state:'ready',running:false,elapsedMs:0,runMs:0,durationMs:3000,activeLow:true,oledOK:true,storage:'Loaded from flash',token:'abc',texts:['AQUA','Ready','Filling','Done'],oledLines:['AQUA','Ready','IP 192.168.4.1']};
+const calls=[]; let fail=false;
+const context=vm.createContext({document:{getElementById:element},performance:{now:()=>1000},setTimeout:()=>1,clearTimeout(){},setInterval(){},AbortController,URLSearchParams,fetch:async(path,options)=>{calls.push({path,options});if(fail)throw Error('offline');return {ok:true,json:async()=>JSON.parse(JSON.stringify(state))};}});
+const run=source=>vm.runInContext(source,context);
+async function test(){
+  vm.runInContext(code,context);
+  await new Promise(setImmediate);
+  assert.equal(element('start').disabled,false);
+  assert.equal(element('seconds').value,'3.0');
+  assert.equal(element('relay').textContent,'OFF');
+  element('settings').input();
+  assert.equal(element('start').disabled,true,'unsaved edits block web start');
+  run('populate(latest);controls()');
+  await element('start').onclick();
+  assert.equal(calls.at(-1).path,'/api/start');
+  assert.equal(calls.at(-1).options.headers['X-Control-Token'],'abc');
+  run('render({...latest,state:"dispensing",running:true,runMs:3000,elapsedMs:1000})');
+  assert.equal(element('start').disabled,true);
+  assert.equal(element('configFields').disabled,true);
+  assert.equal(element('remaining').textContent,'2.0');
+  run('render({...latest,state:"complete",running:false,elapsedMs:3000})');
+  assert.equal(element('relay').textContent,'OFF');
+  assert.equal(element('remaining').textContent,'0.0');
+  element('seconds').value='1.5';
+  await element('settings').onsubmit({preventDefault(){}});
+  const save=calls.findLast(c=>c.path==='/api/settings');
+  assert.equal(save.options.body.get('durationMs'),'1500');
+  assert.equal(save.options.body.size,5);
+  fail=true;
+  await run('poll()');
+  assert.equal(element('relay').textContent,'Unknown');
+  assert.equal(element('start').disabled,true);
+  assert.equal(element('stop').disabled,false);
+  const before=calls.length;
+  await element('stop').onclick();
+  assert.equal(calls.length,before+1,'failed commands are not retried');
+  assert.match(element('notice').textContent,/never retried/);
+  run('render({...latest,texts:["<script>","Ready","Filling","Done"],oledLines:["<script>","Ready","IP"]})');
+  assert.equal(element('oled').textContent,'<script>\nReady\nIP','user text uses textContent');
+  console.log('PASS: dashboard initial load, edits, start/stop, token, run lock, completion, save payload, disconnect, no retry, safe text rendering.');
+}
+test().catch(e=>{console.error(e);process.exitCode=1;});
+

@@ -1,0 +1,9 @@
+# Local Arduino build artifacts
+build/
+*.bin
+*.elf
+*.hex
+*.map
+*.o
+.DS_Store
+Thumbs.db
