@@ -2,13 +2,16 @@
 
 ## Automated software checks
 
-### OLED rotation and diagnostics change
+### OLED rotation, diagnostics and recovery v2
 
 - Arduino CLI compilation passed for `esp8266:esp8266:nodemcuv2`, core 3.1.2,
-  SSD1306 2.5.17, GFX 1.12.6 and BusIO 1.17.4. RAM: 30,760 / 80,192 bytes;
-  instruction RAM including cache: 62,031 / 65,536; flash code: 302,208 / 1,048,576.
+  SSD1306 2.5.17, GFX 1.12.6 and BusIO 1.17.4. RAM: 30,804 / 80,192 bytes;
+  instruction RAM including cache: 62,031 / 65,536; flash code: 302,400 / 1,048,576.
   This was a compile only; no firmware was uploaded.
 - Dashboard behavior tests passed again for this change.
+- Recovery v2 build and source checks passed. Transient-fault recovery, retry
+  spacing and deferral during dispensing still require the controlled bench
+  checks in OLED_DIAGNOSTICS.md; no hardware recovery result is claimed.
 - A source comparison against main commit `1e820e834f41d7d365d0fa075c4293ecb97bfb83`
   confirmed unchanged relay/start/stop/cutoff, button, settings/API, Wi-Fi setup,
   initial relay OFF ordering and existing loop operations. Only the diagnostic
@@ -27,7 +30,7 @@
 
 ## Hardware status
 
-**Not uploaded to or tested on your physical NodeMCU. Relay hardware remains unverified.** No claim is made that the pump switches, the display lights, or a given time delivers a particular volume.
+**Recovery v2 has not been uploaded or tested by this agent on your physical NodeMCU. Relay hardware remains unverified.** The user's logs from the earlier diagnostic firmware confirm an address NACK followed by a reset and a failed startup probe. No claim is made that recovery v2 fixes the physical fault, the pump switches, or a given time delivers a particular volume.
 
 Perform these checks before normal use, initially with pump power disconnected:
 

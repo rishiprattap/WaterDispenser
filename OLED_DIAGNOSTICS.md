@@ -9,8 +9,20 @@ the IP line and progress border. Therefore the reported symptom is not explained
 by an intentional blank frame or screen timeout in this revision. Confirm that
 the uploaded sketch is this version by looking for the new `[boot]` banner.
 
-The actual physical cause is **not yet established**. No serial capture, voltage
-measurement or hardware test was available when preparing this change.
+The user's serial capture now confirms an address NACK (`I2C error=2`) at
+19,679 ms, followed by `oled=0`. After a reported `External System` reset,
+the startup probe also returned 2. This establishes loss of I2C communication,
+but does not distinguish wiring, supply, module failure or interference. Whether
+the external reset was intentional remains unknown. No voltage measurements
+or agent-performed hardware tests are available.
+
+The first diagnostic revision suspended updates until restart. Recovery v2
+instead retries at most once every five seconds while stopped, including when
+the OLED was missing at boot. It probes before initialization and again afterward,
+restores rotation/text settings, and redraws the application screen on success.
+It never retries initialization during dispensing or restarts the ESP8266.
+There are no retry delay loops, address changes or flash writes. A persistent
+hardware fault will still need repair; firmware cannot restore a missing supply.
 
 This patch rotates all rendered content 180 degrees and sets both Adafruit I2C
 transfer/restoration clocks to 100 kHz (the transfer default was 400 kHz). This
@@ -25,7 +37,7 @@ It keeps normal redraws; it does not repeatedly issue DISPLAYON to conceal fault
 2. Open Serial Monitor at **115200 baud**, then press reset once. Save the output
    from boot through at least 30 seconds, including the moment the OLED blanks.
    The ROM boot text may be garbled at this baud; application logs must be readable.
-3. Expect `[boot]` with reset reason/details, `[OLED]` with address, GPIO pins,
+3. Expect `[boot] AquaControl OLED recovery v2` with reset reason/details, `[OLED]` with address, GPIO pins,
    100000 Hz, probe result and initialization status, followed by AP status.
    `[live]` appears about every five seconds with uptime (`ms`), free heap,
    OLED availability, submitted frame count and commanded run state.
@@ -39,9 +51,9 @@ It keeps normal redraws; it does not repeatedly issue DISPLAYON to conceal fault
 | Observation | What it tells you / next check |
 |---|---|
 | Repeated `[boot]` banners and uptime restarting | ESP8266 resets. Use the logged reason/exception details to distinguish watchdog/software faults; a reset reason alone cannot prove or exclude a supply dip. Watch whether Wi-Fi also disappears. |
-| `[OLED] I2C error=...` while uptime continues | The configured address stopped acknowledging or the bus failed. Updates stop, `oledOK` becomes false and the control loop continues. Power down, inspect SDA D2/GPIO4, SCL D1/GPIO5, ground, address and supply; restart after repair. |
+| `[OLED] I2C error=...` while uptime continues | The configured address stopped acknowledging or the bus failed. Frames stop, `oledOK` becomes false and the control loop continues. Idle recovery attempts appear as `[OLED] retry ...`; `init=OK` resumes drawing. Power down before inspecting SDA D2/GPIO4, SCL D1/GPIO5, ground, address and supply. |
 | Startup probe nonzero | No successful address probe; initialization is skipped. Check wiring/address and panel supply. |
-| Startup probe zero but init FAILED | The Adafruit initialization call failed (for this library, framebuffer allocation can fail). Check memory/dependency setup; address ACK alone is insufficient. |
+| Startup/retry probe zero but init FAILED | The Adafruit initialization call failed (for this library, framebuffer allocation can fail). Check memory/dependency setup; address ACK alone is insufficient. |
 | Uptime/frame count continues, OLED remains available, but pixels blank | No observed address-probe failure. This does **not** prove successful frame transfers or a powered/healthy panel. Investigate OLED supply/reset, wiring noise and actual controller/type; inspect I2C with a logic analyzer if available. |
 | Heartbeats stop without a new boot banner | Possible stall, lost USB/serial connection or power loss; check dashboard and supply before drawing a conclusion. |
 
@@ -64,7 +76,11 @@ after reboot. Check relay contacts, not just the dashboard or LEDs.
 With power off, disconnect the OLED; boot and verify web/button timing still
 works. Reconnect only with power off. Runtime bus-fault injection should use a
 controlled test fixture with pump power disconnected; verify the error log,
-disabled OLED writes, continued dashboard/button operation and timed relay OFF.
+paused frame writes, continued dashboard/button operation and timed relay OFF.
+For a controlled transient fault, verify no initialization retries during a run,
+then `[OLED] retry ... init=OK`, restored rotation/text and resumed frame counts
+after stopping and restoring communication. For a persistent fault, verify retries
+are spaced at least five seconds apart while idle and control remains responsive.
 Do not short SDA/SCL to a supply to simulate a fault.
 
 At 100 kHz a full 512-byte framebuffer takes roughly 50 ms including overhead,

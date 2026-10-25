@@ -85,7 +85,7 @@ The ESP8266 creates its own access point; it does not join your home router. Up 
 
 - Set run duration from **0.5 to 30 seconds**, then choose **Save to device**. The UI uses 0.1-second steps; the API accepts whole milliseconds.
 - Customize title, ready, dispensing and completion messages. Each allows 0–21 printable ASCII characters. Emoji, non-ASCII letters and line breaks are rejected to match the built-in OLED font. The remaining-time/IP line, progress bar and manual-stop message are fixed.
-- The OLED mirror shows the text being sent, with a simulated timer bar. It is not a readback of the physical screen. The OLED is rotated 180 degrees (`OLED_ROTATION = 2`). Its address is checked before every frame; a failed probe disables updates and marks it unavailable until restart. Reconnect only with power off.
+- The OLED mirror shows the text being sent, with a simulated timer bar. It is not a readback of the physical screen. The OLED is rotated 180 degrees (`OLED_ROTATION = 2`). Its address is checked before every frame; a failed probe suspends updates. While stopped, the firmware retries initialization at most once every five seconds and resumes drawing if the display responds. Recovery is deferred during dispensing. Reconnect wiring only with power off.
 - Click **Start dispensing** or press the physical button once. Press **Stop now** or press the button again to stop. Release between button presses. Holding the button does not repeatedly start cycles.
 - Saving is disabled during a run and rejected by the device. Unsaved web edits also disable web Start; the physical button always uses the saved/current device configuration.
 - The device refuses a second Start while running. It also has a 500 ms cooldown after stopping. A new run requires a new command; there is no automatic restart.
@@ -115,7 +115,7 @@ OLED blank: follow [the OLED diagnostic procedure](OLED_DIAGNOSTICS.md). Check 1
 
 ## HTTP API
 
-`GET /api/status` returns current commanded state, elapsed/run/configured milliseconds, text settings, OLED lines/availability result, persistence notice, polarity and per-boot token. OLED availability latches false after a failed address probe; true is not pixel readback or proof that every frame transferred. State is `ready`, `dispensing`, `complete` or `stopped`.
+`GET /api/status` returns current commanded state, elapsed/run/configured milliseconds, text settings, OLED lines/availability result, persistence notice, polarity and per-boot token. OLED availability becomes false after a failed address probe and true after successful reinitialization and a new address probe; true is not pixel readback or proof that every frame transferred. State is `ready`, `dispensing`, `complete` or `stopped`.
 
 All mutations require `X-Control-Token` from status and use POST. No CORS access is granted.
 
