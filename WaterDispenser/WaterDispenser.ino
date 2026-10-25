@@ -22,7 +22,8 @@ struct Settings {
 constexpr uint32_t SETTINGS_MAGIC = 0x41515531; // format version 1
 Settings settings{};
 ESP8266WebServer server(80);
-Adafruit_SSD1306 display(128, 32, &Wire, -1);
+// Set both clocks: the library otherwise raises I2C to 400 kHz for transfers.
+Adafruit_SSD1306 display(128, 32, &Wire, -1, OLED_I2C_HZ, OLED_I2C_HZ);
 Ticker cutoff;
 volatile bool deadlineFired = false;
 bool running = false, oledOK = false, apOK = false;
@@ -32,6 +33,52 @@ uint32_t buttonChanged = 0, startedAt = 0, runMs = 0, lastElapsed = 0;
 uint32_t lastOLED = 0, buzzStarted = 0, lastSave = 0, stoppedAt = 0;
 const char* state = "ready";
 String storageNote, controlToken;
+uint32_t lastDiagnostics = 0, oledFrames = 0;
+uint32_t lastOLEDRetry = 0;
+uint8_t oledBusStatus = 0;
+
+uint8_t probeOLED() {
+  Wire.beginTransmission(OLED_ADDRESS);
+  return Wire.endTransmission();
+}
+
+bool initializeOLED() {
+  oledBusStatus = probeOLED();
+  if (oledBusStatus != 0) return false;
+  // No hardware reset pin, no Wire restart, and reuse the allocated buffer.
+  if (!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDRESS, false, false)) return false;
+  oledBusStatus = probeOLED();
+  if (oledBusStatus != 0) return false;
+  display.setRotation(OLED_ROTATION);
+  display.setTextSize(1); display.setTextColor(SSD1306_WHITE); display.setTextWrap(false);
+  return true;
+}
+
+void recoverOLED() {
+  const uint32_t now = millis();
+  // Never reinitialize during a run. One attempt per interval, no waiting loop.
+  if (oledOK || running || uint32_t(now - lastOLEDRetry) < 5000) return;
+  lastOLEDRetry = now;
+  oledOK = initializeOLED();
+  Serial.printf("[OLED] retry ms=%lu probe=%u init=%s\n",
+                (unsigned long)now, oledBusStatus, oledOK ? "OK" : "FAILED");
+  if (oledOK) lastOLED = millis() - 200; // Redraw application content immediately.
+}
+
+void serviceDiagnostics() {
+  const uint32_t now = millis();
+  if (uint32_t(now - lastDiagnostics) < 5000) return;
+  lastDiagnostics = now;
+  // Short heartbeat, no waiting for Serial and no IO in the cutoff callback.
+  // ACK is bus reachability, not confirmation that pixels are visible.
+  char line[96];
+  const int length = snprintf(line, sizeof(line),
+                             "[live] ms=%lu heap=%u oled=%u frames=%lu run=%u\n",
+                             (unsigned long)now, ESP.getFreeHeap(), oledOK,
+                             (unsigned long)oledFrames, running);
+  if (length > 0 && length < int(sizeof(line)) && Serial.availableForWrite() >= length)
+    Serial.write(reinterpret_cast<const uint8_t*>(line), length);
+}
 
 uint32_t checksum(const Settings& s) {
   const uint8_t* bytes = reinterpret_cast<const uint8_t*>(&s);
@@ -159,8 +206,17 @@ String oledTiming() {
 }
 
 void updateOLED() {
+  recoverOLED();
   if (!oledOK || uint32_t(millis() - lastOLED) < 200) return;
   lastOLED = millis();
+  oledBusStatus = probeOLED();
+  if (oledBusStatus != 0) {
+    oledOK = false; // Suspend frames; recover only at a slow rate while idle.
+    lastOLEDRetry = lastOLED;
+    Serial.printf("[OLED] I2C error=%u at ms=%lu; retry when idle\n",
+                  oledBusStatus, (unsigned long)lastOLED);
+    return;
+  }
   display.clearDisplay();
   display.setCursor(0, 0); display.print(settings.text[0]);
   display.setCursor(0, 8); display.print(oledMessage());
@@ -168,6 +224,7 @@ void updateOLED() {
   display.drawRect(0, 26, 128, 6, SSD1306_WHITE);
   if (runMs) display.fillRect(1, 27, (126UL * elapsedMs()) / runMs, 4, SSD1306_WHITE);
   display.display();
+  ++oledFrames; // Submitted frames; Adafruit display() does not report transfer errors.
 }
 
 String quoted(const String& input) {
@@ -273,15 +330,17 @@ void setup() {
   rawButton = stableButton = digitalRead(BUTTON_PIN);
   buttonChanged = millis();
   Serial.begin(115200);
+  Serial.printf("\n[boot] AquaControl OLED recovery v2; reset=%s\n", ESP.getResetReason().c_str());
+  Serial.println(ESP.getResetInfo());
   loadSettings();
   Wire.begin(OLED_SDA, OLED_SCL);
+  Wire.setClock(OLED_I2C_HZ);
   Wire.setClockStretchLimit(1500);
-  Wire.beginTransmission(OLED_ADDRESS);
-  const bool detected = Wire.endTransmission() == 0;
-  oledOK = detected && display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDRESS, false, false);
-  if (oledOK) {
-    display.setTextSize(1); display.setTextColor(SSD1306_WHITE); display.setTextWrap(false);
-  }
+  oledOK = initializeOLED();
+  lastOLEDRetry = millis();
+  Serial.printf("[OLED] addr=0x%02X SDA=%u SCL=%u Hz=%lu probe=%u init=%s\n",
+                OLED_ADDRESS, OLED_SDA, OLED_SCL, (unsigned long)OLED_I2C_HZ,
+                oledBusStatus, oledOK ? "OK" : "FAILED");
   WiFi.persistent(false);
   WiFi.mode(WIFI_AP);
   apOK = WiFi.softAPConfig(IPAddress(192,168,4,1), IPAddress(192,168,4,1), IPAddress(255,255,255,0));
@@ -321,5 +380,6 @@ void loop() {
     digitalWrite(BUZZER_PIN, LOW); buzzing = false;
   }
   updateOLED();
+  serviceDiagnostics();
   yield();
 }
