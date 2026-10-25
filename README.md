@@ -85,7 +85,7 @@ The ESP8266 creates its own access point; it does not join your home router. Up 
 
 - Set run duration from **0.5 to 30 seconds**, then choose **Save to device**. The UI uses 0.1-second steps; the API accepts whole milliseconds.
 - Customize title, ready, dispensing and completion messages. Each allows 0–21 printable ASCII characters. Emoji, non-ASCII letters and line breaks are rejected to match the built-in OLED font. The remaining-time/IP line, progress bar and manual-stop message are fixed.
-- The OLED mirror shows the text being sent, with a simulated timer bar. It is not a readback of the physical screen. OLED detection happens at boot; reconnecting a missing display requires a restart.
+- The OLED mirror shows the text being sent, with a simulated timer bar. It is not a readback of the physical screen. The OLED is rotated 180 degrees (`OLED_ROTATION = 2`). Its address is checked before every frame; a failed probe disables updates and marks it unavailable until restart. Reconnect only with power off.
 - Click **Start dispensing** or press the physical button once. Press **Stop now** or press the button again to stop. Release between button presses. Holding the button does not repeatedly start cycles.
 - Saving is disabled during a run and rejected by the device. Unsaved web edits also disable web Start; the physical button always uses the saved/current device configuration.
 - The device refuses a second Start while running. It also has a 500 ms cooldown after stopping. A new run requires a new command; there is no automatic restart.
@@ -111,11 +111,11 @@ Each run snapshots the duration (bounded to 30,000 ms). The main loop checks the
 5. If D7 changes but contacts do not, investigate relay power, input compatibility, polarity or a defective module. Do not keep changing timing to solve an electrical problem.
 6. Verify relay OFF at boot, during reset, after timeout, after manual Stop and after power loss/recovery before connecting the pump. If operation is inverted, disconnect pump power and correct polarity/wiring.
 
-OLED blank: check 128×32 SSD1306 type, SDA/SCL order, supply and address; change `OLED_ADDRESS` to 0x3D only if appropriate. Missing OLED does not disable timed control. Buzzer wrong/silent: set `PASSIVE_BUZZER` for your device or set `BUZZER_ENABLED = false`; an active buzzer here must use an active-HIGH input.
+OLED blank: follow [the OLED diagnostic procedure](OLED_DIAGNOSTICS.md). Check 128×32 SSD1306 type, SDA/SCL order, supply and address; change `OLED_ADDRESS` to 0x3D only if appropriate. Missing OLED does not disable timed control. Buzzer wrong/silent: set `PASSIVE_BUZZER` for your device or set `BUZZER_ENABLED = false`; an active buzzer here must use an active-HIGH input.
 
 ## HTTP API
 
-`GET /api/status` returns current commanded state, elapsed/run/configured milliseconds, text settings, OLED lines/boot-detection result, persistence notice, polarity and per-boot token. State is `ready`, `dispensing`, `complete` or `stopped`.
+`GET /api/status` returns current commanded state, elapsed/run/configured milliseconds, text settings, OLED lines/availability result, persistence notice, polarity and per-boot token. OLED availability latches false after a failed address probe; true is not pixel readback or proof that every frame transferred. State is `ready`, `dispensing`, `complete` or `stopped`.
 
 All mutations require `X-Control-Token` from status and use POST. No CORS access is granted.
 
